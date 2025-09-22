@@ -11,7 +11,7 @@ import ActivityIndicatorView
 struct AttachmentsEditor<InputViewContent: View>: View {
    let logTAG = "AttachmentsEditor"
    
-   typealias InputViewBuilderClosure = ChatView<EmptyView, InputViewContent>.InputViewBuilderClosure
+   typealias InputViewBuilderClosure = ChatView<EmptyView, InputViewContent, EmptyView>.InputViewBuilderClosure
    
    @Environment(\.chatTheme) var theme
    @Environment(\.mediaPickerTheme) var pickerTheme
@@ -140,7 +140,7 @@ struct AttachmentsEditor<InputViewContent: View>: View {
    var inputView: some View {
       Group {
          if let inputViewBuilder = inputViewBuilder {
-            inputViewBuilder($inputViewModel.attachments.text, inputViewModel.attachments, inputViewModel.state, .signature, inputViewModel.inputViewAction()) {
+            inputViewBuilder($inputViewModel.text, inputViewModel.attachments, inputViewModel.state, .signature, inputViewModel.inputViewAction()) {
                globalFocusState.focus = nil
             }
          } else {

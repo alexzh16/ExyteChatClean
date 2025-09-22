@@ -14,7 +14,7 @@ import UIKit
 public typealias MediaPickerParameters = SelectionParamsHolder
 
 public enum ChatType {
-   case chat // input view and the latest message at the bottom
+   case conversation // input view and the latest message at the bottom
    case comments // input view and the latest message on top
 }
 public enum AttachmentOption {
@@ -23,7 +23,12 @@ public enum AttachmentOption {
    case file
 }
 
-public struct ChatView<MessageContent: View, InputViewContent: View>: View {
+public enum ReplyMode {
+   case quote // when replying to message A, new message will appear as the newest message, quoting message A in its body
+   case answer // when replying to message A, new message with appear direclty below message A as a separate cell without duplication message A in its body
+}
+
+public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyContent: View>: View {
    let logTAG = "ChatView"
    @Namespace private var scrollViewNamespace
    @State private var scrollViewProxy: ScrollViewProxy? = nil
@@ -31,8 +36,10 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
    /// To build a custom message view use the following parameters passed by this closure:
    /// - message containing user, attachments, etc.
    /// - position of message in its continuous group of messages from the same user
+   /// - position of message in its continuous group of comments (only works for .comments ReplyMode, nil for .quote mode)
+   /// - closure to pass user interaction, .reply for example
    /// - pass attachment to this closure to use ChatView's fullscreen media viewer
-   public typealias MessageBuilderClosure = ((Message, PositionInGroup, @escaping (Attachment) -> Void) -> MessageContent)
+   public typealias MessageBuilderClosure = ((Message, PositionInGroup, PositionInCommentsGroup?, @escaping (Message, MessageMenuAction) -> Void, @escaping (Attachment) -> Void) -> MessageContent)
    
    /// To build a custom input view use the following parameters passed by this closure:
    /// - binding to the text in input view
@@ -41,8 +48,13 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
    /// - .message for main input view mode and .signature for input view in media picker mode
    /// - closure to pass user interaction, .recordAudioTap for example
    /// - dismiss keyboard closure
-   public typealias InputViewBuilderClosure = ((
-      Binding<String>, InputViewAttachments, InputViewState, InputViewStyle, @escaping (InputViewAction) -> Void, ()->()) -> InputViewContent)
+   public typealias InputViewBuilderClosure = (Binding<String>, InputViewAttachments, InputViewState, InputViewStyle, @escaping (InputViewAction) -> Void, ()->()) -> InputViewContent
+   
+   /// To place input view and main chat view (e.g. in your own ScrollView)
+   /// You can still pass your own builders or just place built-in ones
+   /// - main chat list of messages
+   /// - input view
+   public typealias MainBodyBuilderClosure = (AnyView, AnyView) -> MainBodyContent
    
    /// User and MessageId
    public typealias TapAvatarClosure = (ExyteChatUser, String) -> ()
@@ -52,10 +64,10 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
    @Environment(\.mediaPickerTheme) private var pickerTheme
    
    // MARK: - Parameters
-   
-   private let sections: [MessagesSection]
-   private let ids: [String]
-   private let didSendMessage: (DraftMessage) -> Void
+   let type: ChatType
+   let sections: [MessagesSection]
+   let ids: [String]
+   let didSendMessage: (DraftMessage) -> Void
    
    // MARK: - View builders
    
@@ -65,17 +77,25 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
    /// provide custom input view builder
    var inputViewBuilder: InputViewBuilderClosure? = nil
    
+   /// organize main chat component using this closure
+   var mainBodyBuilder: MainBodyBuilderClosure? = nil
+   
+   /// date section header builder
+   var headerBuilder: ((Date)->AnyView)?
+   
    // MARK: - Customization
    
-   var type: ChatType = .chat
    var showDateHeaders: Bool = true
+   var isScrollEnabled: Bool = true
    var avatarSize: CGFloat = 32
    var messageUseMarkdown: Bool = false
    var showMessageMenuOnLongPress: Bool = true
+   var showNetworkConnectionProblem: Bool = false
    var tapAvatarClosure: TapAvatarClosure?
    var mediaPickerSelectionParameters: MediaPickerParameters?
    var orientationHandler: MediaPickerOrientationHandler = {_ in}
    var chatTitle: String?
+   var paginationHandler: PaginationHandler?
    var showMessageTimeView = true
    var messageFont = UIFontMetrics.default.scaledFont(for: UIFont.systemFont(ofSize: 15))
    var availablelInput: AvailableInputType = .full
@@ -83,11 +103,8 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
    @StateObject private var viewModel = ChatViewModel()
    @StateObject private var inputViewModel = InputViewModel()
    @StateObject private var globalFocusState = GlobalFocusState()
-   @StateObject private var paginationState = PaginationState()
    @StateObject private var networkMonitor = NetworkMonitor()
    @StateObject private var keyboardState = KeyboardState()
-   
-   @State private var inputFieldId = UUID()
    
    @State private var isScrolledToBottom: Bool = true
    @State private var shouldScrollToTop: () -> () = {}
@@ -96,6 +113,8 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
    @State private var needsScrollView = false
    @State private var readyToShowScrollView = false
    @State private var menuButtonsSize: CGSize = .zero
+   @State private var tableContentHeight: CGFloat = 0
+   @State private var inputViewSize = CGSize.zero
    @State private var cellFrames = [String: CGRect]()
    @State private var menuCellPosition: CGPoint = .zero
    @State private var menuBgOpacity: CGFloat = 0
@@ -108,70 +127,28 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
    @State private var snackbarMessage = ""
    
    public init(messages: [Message],
+               chatType: ChatType = .conversation,
+               replyMode: ReplyMode = .quote,
                didSendMessage: @escaping (DraftMessage) -> Void,
                messageBuilder: @escaping MessageBuilderClosure,
-               inputViewBuilder: @escaping InputViewBuilderClosure) {
+               inputViewBuilder: @escaping InputViewBuilderClosure,
+               mainBodyBuilder: @escaping MainBodyBuilderClosure) {
+      self.type = chatType
       self.didSendMessage = didSendMessage
-      self.sections = ChatView.mapMessages(messages)
+      self.sections = ChatView.mapMessages(messages, chatType: chatType, replyMode: replyMode)
       self.ids = messages.map { $0.id }
       self.messageBuilder = messageBuilder
       self.inputViewBuilder = inputViewBuilder
+      self.mainBodyBuilder = mainBodyBuilder
    }
    
    public var body: some View {
-      VStack {
-         if !networkMonitor.isConnected {
-            waitingForNetwork
+      Group {
+         if let mainBodyBuilder {
+            mainBodyBuilder(AnyView(list), AnyView(inputView))
+         } else {
+            defaultBody
          }
-         
-         switch type {
-         case .chat:
-            ZStack(alignment: .bottomTrailing) {
-               list
-               
-               if !isScrolledToBottom {
-                  Button {
-                     NotificationCenter.default.post(name: .onScrollToBottom, object: nil)
-                  } label: {
-                     theme.images.scrollToBottom
-                        .frame(width: 40, height: 40)
-                        .circleBackground(theme.colors.friendMessage)
-                  }
-                  .padding(8)
-               }
-            }
-            .overlay(
-               VStack {
-                  if isShowingSnackbar {
-                     ZStack {
-                        Color.black.opacity(0.7)
-                           .edgesIgnoringSafeArea(.all)
-                           .onTapGesture {
-                              withAnimation{hideSnackbar()}
-                           }
-                        
-                        VStack {
-                           Text(snackbarMessage)
-                              .foregroundColor(.white)
-                              .padding()
-                        }
-                     }
-                     .transition(.move(edge: .bottom))
-                     .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                           withAnimation {hideSnackbar()}
-                        }
-                     }
-                  }
-               }
-            )
-            inputView
-            
-         case .comments:
-            inputView
-            list
-         }
-         
       }
       .background(theme.colors.mainBackground)
       .fullScreenCover(isPresented: $viewModel.fullscreenAttachmentPresented) {
@@ -210,6 +187,34 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
       .environmentObject(keyboardState)
    }
    
+   var defaultBody: some View {
+      VStack {
+         if showNetworkConnectionProblem, !networkMonitor.isConnected {
+            waitingForNetwork
+         }
+         switch type {
+         case .conversation:
+            ZStack(alignment: .bottomTrailing) {
+               list
+               if !isScrolledToBottom {
+                  Button {
+                     NotificationCenter.default.post(name: .onScrollToBottom, object: nil)
+                  } label: {
+                     theme.images.scrollToBottom
+                        .frame(width: 40, height: 40)
+                        .circleBackground(theme.colors.friendMessage)
+                  }
+                  .padding(8)
+               }
+            }
+            inputView
+         case .comments:
+            inputView
+            list.ignoresSafeArea()
+         }
+      }
+   }
+   
    var waitingForNetwork: some View {
       VStack {
          Rectangle()
@@ -228,28 +233,32 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
       }
       .padding(.top, 8)
    }
+   
    @ViewBuilder
    var list: some View {
-      ScrollViewReader { proxy in
-         UIList(viewModel: viewModel,
-                paginationState: paginationState,
-                isScrolledToBottom: $isScrolledToBottom,
-                shouldScrollToTop: $shouldScrollToTop,
-                messageBuilder: messageBuilder,
-                type: type,
-                showDateHeaders: showDateHeaders,
-                avatarSize: avatarSize,
-                showMessageMenuOnLongPress: showMessageMenuOnLongPress,
-                tapAvatarClosure: tapAvatarClosure,
-                messageUseMarkdown: messageUseMarkdown,
-                showMessageTimeView: showMessageTimeView,
-                messageFont: messageFont,
-                sections: sections,
-                ids: ids
-         )
-         .onAppear {
-            scrollViewProxy = proxy
-         }
+      UIList(viewModel: viewModel,
+             inputViewModel: inputViewModel,
+             isScrolledToBottom: $isScrolledToBottom,
+             shouldScrollToTop: $shouldScrollToTop,
+             tableContentHeight: $tableContentHeight,
+             messageBuilder: messageBuilder,
+             headerBuilder: headerBuilder,
+             inputView: inputView,
+             type: type,
+             showDateHeaders: showDateHeaders,
+             isScrollEnabled: isScrollEnabled,
+             avatarSize: avatarSize,
+             showMessageMenuOnLongPress: showMessageMenuOnLongPress,
+             tapAvatarClosure: tapAvatarClosure,
+             paginationHandler: paginationHandler,
+             messageUseMarkdown: messageUseMarkdown,
+             showMessageTimeView: showMessageTimeView,
+             messageFont: messageFont,
+             sections: sections,
+             ids: ids
+      )
+      .applyIf(!isScrollEnabled) {
+         $0.frame(height: tableContentHeight)
       }
       .onStatusBarTap {
          shouldScrollToTop()
@@ -297,32 +306,40 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
       }
       .onAppear {
          viewModel.didSendMessage = didSendMessage
+         viewModel.inputViewModel = inputViewModel
+         viewModel.globalFocusState = globalFocusState
+         
          inputViewModel.didSendMessage = { value in
             didSendMessage(value)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-               NotificationCenter.default.post(name: .onScrollToBottom, object: nil)
+            if type == .conversation {
+               DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                  NotificationCenter.default.post(name: .onScrollToBottom, object: nil)
+               }
             }
          }
       }
    }
    
-   @ViewBuilder
    var inputView: some View {
       Group {
          if let inputViewBuilder = inputViewBuilder {
-            inputViewBuilder($inputViewModel.attachments.text, inputViewModel.attachments, inputViewModel.state, .message, inputViewModel.inputViewAction()) {
+            inputViewBuilder($inputViewModel.text, inputViewModel.attachments, inputViewModel.state, .message, inputViewModel.inputViewAction()) {
                globalFocusState.focus = nil
             }
          } else {
             InputView(
                viewModel: inputViewModel,
-               inputFieldId: inputFieldId,
+               inputFieldId: viewModel.inputFieldId,
                style: .message,
                availableInput: availablelInput,
                messageUseMarkdown: messageUseMarkdown
             )
          }
       }
+      .onChange(of: inputViewModel.text) {a, _ in
+         debugPrint("\(#function) \(#line) a: \(a)")
+      }
+      .sizeGetter($inputViewSize)
       .environmentObject(globalFocusState)
       .onAppear(perform: inputViewModel.onStart)
       .onDisappear(perform: inputViewModel.onStop)
@@ -363,9 +380,8 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
             }
          },
          onAction: { action in
-            Task {
-               await onMessageMenuAction(row: row, action: action)
-            }
+            hideMessageMenu()
+            viewModel.messageMenuActionInternal(message: row.message, action: action)
          },
          messageText: row.message.text,
          messageImageURL: row.message.attachments.first(where: { $0.type == .image })?.full,
@@ -441,50 +457,6 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
          isShowingMenu = false
          needsScrollView = false
          readyToShowScrollView = false
-      }
-   }
-   
-   func onMessageMenuAction(row: MessageRow, action: MessageMenuAction) async {
-      hideMessageMenu()
-      
-      switch action {
-      case .reply:
-         inputViewModel.attachments.replyMessage = await row.message.toReplyMessage()
-         globalFocusState.focus = .uuid(inputFieldId)
-         if let replyToMessageId = row.message.replyMessage?.id {
-            scrollToMessage(withId: replyToMessageId)
-         }
-      case .copy:
-         if !row.message.text.isEmpty {
-            UIPasteboard.general.string = row.message.text
-         } else if let imageAttachment = row.message.attachments.first(where: { $0.type == .image }) {
-            if let imageData = try? Data(contentsOf: imageAttachment.full), let image = UIImage(data: imageData) {
-               UIPasteboard.general.image = image
-            }
-         }
-      case .saveImageToAlbum:
-         if let imageAttachment = row.message.attachments.first(where: { $0.type == .image }) {
-            saveImageToAlbum(imageAttachment.full)
-         }
-      case .saveImageToDevice:
-         if let documentAttachment = row.message.attachments.first(where: { $0.type == .files }) {
-            saveDocument(url: documentAttachment.full)
-         }
-      case .saveDocument:
-         if let documentAttachment = row.message.attachments.first(where: { $0.type == .files }) {
-            saveDocument(url: documentAttachment.full)
-         }
-         break
-      case .saveText:
-         // Handle saving text logic if needed
-         break
-      case .share:
-         var itemsToShare = [Any]()
-         if let attachment = row.message.attachments.first {
-            itemsToShare.append(attachment.full)
-            downloadAndShareFiles(from: attachment.full)
-         }
-         globalFocusState.focus = .uuid(inputFieldId)
       }
    }
    
@@ -627,65 +599,25 @@ public struct ChatView<MessageContent: View, InputViewContent: View>: View {
    }
 }
 
-private extension ChatView {
-   static func mapMessages(_ messages: [Message]) -> [MessagesSection] {
-      guard messages.hasUniqueIDs() else {
-         fatalError("Messages can not have duplicate ids, please make sure every message gets a unique id")
-      }
-      let dates = Set(messages.map({ $0.createdAt.startOfDay() }))
-         .sorted()
-         .reversed()
-      var result: [MessagesSection] = []
-      
-      for date in dates {
-         let section = MessagesSection(
-            date: date,
-            rows: wrapMessages(messages.filter({ $0.createdAt.isSameDay(date) }))
-         )
-         result.append(section)
-      }
-      
-      return result
-   }
-   
-   static func wrapMessages(_ messages: [ExyteChatMessage]) -> [MessageRow] {
-      guard !messages.isEmpty else { return [] }
-      
-      return messages
-         .enumerated()
-         .map { index, message in
-            let nextMessageExists = index + 1 < messages.count
-            let nextMessageIsSameUser = nextMessageExists && messages[index + 1].user.id == message.user.id
-            let prevMessageIsSameUser = index - 1 >= 0 && messages[index - 1].user.id == message.user.id
-            
-            let position: PositionInGroup
-            if nextMessageExists && nextMessageIsSameUser && prevMessageIsSameUser {
-               position = .middle
-            } else if !nextMessageExists || (!nextMessageIsSameUser && !prevMessageIsSameUser) {
-               position = .single
-            } else if nextMessageExists && nextMessageIsSameUser {
-               position = .first
-            } else {
-               position = .last
-            }
-            
-            return MessageRow(message: message, positionInGroup: position)
-         }
-         .reversed()
-   }
-}
-
 public extension ChatView {
    
-   func chatType(_ type: ChatType) -> ChatView {
+   func showDateHeaders(_ showDateHeaders: Bool) -> ChatView {
       var view = self
-      view.type = type
+      view.showDateHeaders = showDateHeaders
       return view
    }
    
-   func showDateHeaders(showDateHeaders: Bool) -> ChatView {
+   func headerBuilder<V: View>(_ builder: @escaping (Date)->V) -> ChatView {
       var view = self
-      view.showDateHeaders = showDateHeaders
+      view.headerBuilder = { date in
+         AnyView(builder(date))
+      }
+      return view
+   }
+   
+   func isScrollEnabled(_ isScrollEnabled: Bool) -> ChatView {
+      var view = self
+      view.isScrollEnabled = isScrollEnabled
       return view
    }
    
@@ -704,6 +636,12 @@ public extension ChatView {
    func showMessageMenuOnLongPress(_ show: Bool) -> ChatView {
       var view = self
       view.showMessageMenuOnLongPress = show
+      return view
+   }
+   
+   func showNetworkConnectionProblem(_ show: Bool) -> ChatView {
+      var view = self
+      view.showNetworkConnectionProblem = show
       return view
    }
    
@@ -732,10 +670,10 @@ public extension ChatView {
       return view
    }
    
-   /// when user scrolls to `offset`-th meassage from the end, call the handler function, so user can load more messages
-   func enableLoadMore(offset: Int = 0, handler: @escaping ChatPaginationClosure) -> ChatView {
+   /// when user scrolls up to `pageSize`-th meassage, call the handler function, so user can load more messages
+   func enableLoadMore(pageSize: Int, _ handler: @escaping ChatPaginationClosure) -> ChatView {
       var view = self
-      view._paginationState = StateObject(wrappedValue: PaginationState(onEvent: handler, offset: offset))
+      view.paginationHandler = PaginationHandler(handleClosure: handler, pageSize: pageSize)
       return view
    }
    
@@ -761,39 +699,5 @@ public extension ChatView {
       var view = self
       view.availablelInput = type
       return view
-   }
-}
-
-public extension ChatView where MessageContent == EmptyView {
-   
-   init(messages: [Message],
-        didSendMessage: @escaping (DraftMessage) -> Void,
-        inputViewBuilder: @escaping InputViewBuilderClosure) {
-      self.didSendMessage = didSendMessage
-      self.sections = ChatView.mapMessages(messages)
-      self.ids = messages.map { $0.id }
-      self.inputViewBuilder = inputViewBuilder
-   }
-}
-
-public extension ChatView where InputViewContent == EmptyView {
-   
-   init(messages: [Message],
-        didSendMessage: @escaping (DraftMessage) -> Void,
-        messageBuilder: @escaping MessageBuilderClosure) {
-      self.didSendMessage = didSendMessage
-      self.sections = ChatView.mapMessages(messages)
-      self.ids = messages.map { $0.id }
-      self.messageBuilder = messageBuilder
-   }
-}
-
-public extension ChatView where MessageContent == EmptyView, InputViewContent == EmptyView {
-   
-   init(messages: [Message],
-        didSendMessage: @escaping (DraftMessage) -> Void) {
-      self.didSendMessage = didSendMessage
-      self.sections = ChatView.mapMessages(messages)
-      self.ids = messages.map { $0.id }
    }
 }

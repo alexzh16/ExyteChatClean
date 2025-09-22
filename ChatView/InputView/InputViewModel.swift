@@ -10,6 +10,7 @@ import UIKit
 final class InputViewModel: ObservableObject {
    let logTAG = "InputViewModel"
    // MARK: - Published Properties
+   @Published var text: String = ""
    @Published var attachments = InputViewAttachments()
    @Published var state: InputViewState = .empty
    @Published var documents: [URL] = []
@@ -40,6 +41,7 @@ final class InputViewModel: ObservableObject {
    
    func reset() {
       DispatchQueue.main.async { [weak self] in
+         self?.text = ""
          self?.attachments = InputViewAttachments()
          self?.showPicker = false
          self?.showDocumentPicker = false
@@ -256,14 +258,36 @@ private extension InputViewModel {
    func validateDraft() {
       DispatchQueue.main.async { [weak self] in
          guard let self = self else { return }
-         if !self.attachments.text.isEmpty || !self.attachments.medias.isEmpty {
+         if !self.text.isEmpty || !self.attachments.medias.isEmpty {
             self.state = .hasTextOrMedia
-         } else if self.attachments.text.isEmpty,
+         } else if self.text.isEmpty,
                    self.attachments.medias.isEmpty,
                    self.attachments.recording == nil {
             self.state = .empty
          }
       }
+   }
+   
+   func subscribeValidation() {
+       $attachments.sink { [weak self] _ in
+           self?.validateDraft()
+       }
+       .store(in: &subscriptions)
+
+       $text.sink { [weak self] _ in
+           self?.validateDraft()
+       }
+       .store(in: &subscriptions)
+   }
+   
+   func subscribePicker() {
+       $showPicker
+           .sink { [weak self] value in
+               if !value {
+                   self?.attachments.medias = []
+               }
+           }
+           .store(in: &subscriptions)
    }
    
    func subscribeRecordPlayer() {
@@ -365,7 +389,7 @@ private extension InputViewModel {
       return Publishers.Zip(mapAttachmentsForSend(), mapDocumentsForSend())
          .compactMap { [attachments] mediaAttachments, documentAttachments in
             DraftMessage(
-               text: attachments.text,
+               text: self.text,
                medias: attachments.medias,
                files: documentAttachments,
                recording: attachments.recording,

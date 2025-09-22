@@ -9,7 +9,7 @@ import FloatingButton
 import enum FloatingButton.Alignment
 import UIKit // Required for UIPasteboard
 
-enum MessageMenuAction {
+public enum MessageMenuAction {
     case reply
     case copy
     case saveImageToAlbum

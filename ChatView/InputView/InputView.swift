@@ -63,7 +63,6 @@ public enum AvailableInputType {
 }
 
 public struct InputViewAttachments {
-   public var text: String = ""
    public var medias: [Media] = []
    public var documents: [URL] = []
    public var recording: Recording?
@@ -204,7 +203,8 @@ struct InputView: View {
          case .isRecordingTap:
             recordingInProgress
          default:
-            TextInputView(text: $viewModel.attachments.text, inputFieldId: inputFieldId, style: style, availableInput: availableInput)
+            TextInputView(text: $viewModel.text, inputFieldId: inputFieldId, style: style, availableInput: availableInput)
+//            Text("")
          }
       }
       .frame(minHeight: 48)
