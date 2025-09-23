@@ -11,7 +11,7 @@ import ActivityIndicatorView
 struct AttachmentsEditor<InputViewContent: View>: View {
    let logTAG = "AttachmentsEditor"
    
-   typealias InputViewBuilderClosure = ChatView<EmptyView, InputViewContent, EmptyView>.InputViewBuilderClosure
+   typealias InputViewBuilderClosure = ChatView<EmptyView, InputViewContent, EmptyView, DefaultMessageMenuAction>.InputViewBuilderClosure
    
    @Environment(\.chatTheme) var theme
    @Environment(\.mediaPickerTheme) var pickerTheme

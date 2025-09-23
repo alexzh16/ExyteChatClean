@@ -13,8 +13,8 @@ struct MessageView: View {
    
    @ObservedObject var viewModel: ChatViewModel
    
-   let message: ExyteChatMessage
-   let positionInGroup: PositionInGroup
+   let message: Message
+   let positionInUserGroup: PositionInUserGroup
    let chatType: ChatType
    let avatarSize: CGFloat
    let tapAvatarClosure: ChatView.TapAvatarClosure?
@@ -67,19 +67,19 @@ struct MessageView: View {
    }
    
    var showAvatar: Bool {
-      positionInGroup == .single
-      || (chatType == .conversation && positionInGroup == .last)
-      || (chatType == .comments && positionInGroup == .first)
+      positionInUserGroup == .single
+      || (chatType == .conversation && positionInUserGroup == .last)
+      || (chatType == .comments && positionInUserGroup == .first)
    }
    
    var topPadding: CGFloat {
       if chatType == .comments { return 0 }
-      return positionInGroup == .single || positionInGroup == .first ? 8 : 4
+      return positionInUserGroup == .single || positionInUserGroup == .first ? 8 : 4
    }
    
    var bottomPadding: CGFloat {
       if chatType == .conversation { return 0 }
-      return positionInGroup == .single || positionInGroup == .first ? 8 : 4
+      return positionInUserGroup == .single || positionInUserGroup == .first ? 8 : 4
    }
    
    var body: some View {
@@ -118,7 +118,7 @@ struct MessageView: View {
    }
    
    @ViewBuilder
-   func bubbleView(_ message: ExyteChatMessage) -> some View {
+   func bubbleView(_ message: Message) -> some View {
       VStack(alignment: .leading, spacing: 0) {
          if !message.attachments.isEmpty {
             attachmentsView(message)
@@ -142,7 +142,7 @@ struct MessageView: View {
    }
    
    @ViewBuilder
-   func replyBubbleView(_ message: ExyteChatMessage) -> some View {
+   func replyBubbleView(_ message: Message) -> some View {
       VStack(alignment: .leading, spacing: 0) {
          Text(message.user.name)
             .fontWeight(.semibold)
@@ -187,7 +187,7 @@ struct MessageView: View {
    }
    
    @ViewBuilder
-   func attachmentsView(_ message: ExyteChatMessage) -> some View {
+   func attachmentsView(_ message: Message) -> some View {
       AttachmentsGrid(attachments: message.attachments) {
          viewModel.presentAttachmentFullScreen($0)
       }
@@ -206,7 +206,7 @@ struct MessageView: View {
    }
    
    @ViewBuilder
-   func textWithTimeView(_ message: ExyteChatMessage) -> some View {
+   func textWithTimeView(_ message: Message) -> some View {
       let messageView = MessageTextView(text: message.text, messageUseMarkdown: messageUseMarkdown)
          .fixedSize(horizontal: false, vertical: true)
          .padding(.horizontal, MessageView.horizontalTextPadding)
@@ -272,7 +272,7 @@ struct MessageView: View {
 extension View {
    
    @ViewBuilder
-   func bubbleBackground(_ message: ExyteChatMessage, theme: ChatTheme, isReply: Bool = false) -> some View {
+   func bubbleBackground(_ message: Message, theme: ChatTheme, isReply: Bool = false) -> some View {
       let radius: CGFloat = !message.attachments.isEmpty ? 12 : 20
       let additionalMediaInset: CGFloat = message.attachments.count > 1 ? 2 : 0
       self
@@ -297,7 +297,7 @@ struct MessageView_Preview: PreviewProvider {
    static private var shortMessage = "Hi, buddy!"
    static private var longMessage = "Hello hello hello hello hello hello hello hello hello hello hello hello hello\n hello hello hello hello d d d d d d d d"
    
-   static private var replyedMessage = ExyteChatMessage(
+   static private var replyedMessage = Message(
       id: UUID().uuidString,
       user: stan,
       status: .read,
@@ -311,7 +311,7 @@ struct MessageView_Preview: PreviewProvider {
       ]
    )
    
-   static private var message = ExyteChatMessage(
+   static private var message = Message(
       id: UUID().uuidString,
       user: stan,
       status: .read,
@@ -326,7 +326,7 @@ struct MessageView_Preview: PreviewProvider {
          MessageView(
             viewModel: ChatViewModel(),
             message: replyedMessage,
-            positionInGroup: .single,
+            positionInUserGroup: .single,
             chatType: .conversation,
             avatarSize: 32,
             tapAvatarClosure: nil,

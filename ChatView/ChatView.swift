@@ -28,7 +28,7 @@ public enum ReplyMode {
    case answer // when replying to message A, new message with appear direclty below message A as a separate cell without duplication message A in its body
 }
 
-public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyContent: View>: View {
+public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyContent: View, MenuAction: MessageMenuAction>: View {
    let logTAG = "ChatView"
    @Namespace private var scrollViewNamespace
    @State private var scrollViewProxy: ScrollViewProxy? = nil
@@ -37,9 +37,10 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyCon
    /// - message containing user, attachments, etc.
    /// - position of message in its continuous group of messages from the same user
    /// - position of message in its continuous group of comments (only works for .comments ReplyMode, nil for .quote mode)
+   /// - closure to show message context menu
    /// - closure to pass user interaction, .reply for example
    /// - pass attachment to this closure to use ChatView's fullscreen media viewer
-   public typealias MessageBuilderClosure = ((Message, PositionInGroup, PositionInCommentsGroup?, @escaping (Message, MessageMenuAction) -> Void, @escaping (Attachment) -> Void) -> MessageContent)
+   public typealias MessageBuilderClosure = ((Message, PositionInUserGroup, CommentsPosition?, @escaping () -> Void, @escaping (Message, DefaultMessageMenuAction) -> Void, @escaping (Attachment) -> Void) -> MessageContent)
    
    /// To build a custom input view use the following parameters passed by this closure:
    /// - binding to the text in input view
@@ -48,14 +49,26 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyCon
    /// - .message for main input view mode and .signature for input view in media picker mode
    /// - closure to pass user interaction, .recordAudioTap for example
    /// - dismiss keyboard closure
-   public typealias InputViewBuilderClosure = (Binding<String>, InputViewAttachments, InputViewState, InputViewStyle, @escaping (InputViewAction) -> Void, ()->()) -> InputViewContent
-   
+   public typealias InputViewBuilderClosure = (
+           Binding<String>,
+           InputViewAttachments,
+           InputViewState,
+           InputViewStyle,
+           @escaping (InputViewAction) -> Void,
+           ()->()
+       ) -> InputViewContent
    /// To place input view and main chat view (e.g. in your own ScrollView)
    /// You can still pass your own builders or just place built-in ones
    /// - main chat list of messages
    /// - input view
    public typealias MainBodyBuilderClosure = (AnyView, AnyView) -> MainBodyContent
    
+   /// To define custom message menu actions
+   /// - enum listing action options
+   /// - message for which the menu is disaplyed
+   /// closure returns the action to perform on selected action tap
+   public typealias MessageMenuActionClosure = ((MenuAction, Message)->Void)
+
    /// User and MessageId
    public typealias TapAvatarClosure = (ExyteChatUser, String) -> ()
    
@@ -79,6 +92,9 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyCon
    
    /// organize main chat component using this closure
    var mainBodyBuilder: MainBodyBuilderClosure? = nil
+   
+   /// message menu customization: create enum complying to MessageMenuAction and pass a closure processing your enum cases
+   var messageMenuAction: MessageMenuActionClosure?
    
    /// date section header builder
    var headerBuilder: ((Date)->AnyView)?
@@ -132,7 +148,8 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyCon
                didSendMessage: @escaping (DraftMessage) -> Void,
                messageBuilder: @escaping MessageBuilderClosure,
                inputViewBuilder: @escaping InputViewBuilderClosure,
-               mainBodyBuilder: @escaping MainBodyBuilderClosure) {
+               mainBodyBuilder: @escaping MainBodyBuilderClosure,
+               messageMenuAction: MessageMenuActionClosure?) {
       self.type = chatType
       self.didSendMessage = didSendMessage
       self.sections = ChatView.mapMessages(messages, chatType: chatType, replyMode: replyMode)
@@ -140,6 +157,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyCon
       self.messageBuilder = messageBuilder
       self.inputViewBuilder = inputViewBuilder
       self.mainBodyBuilder = mainBodyBuilder
+      self.messageMenuAction = messageMenuAction
    }
    
    public var body: some View {
@@ -266,7 +284,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyCon
       .transparentNonAnimatingFullScreenCover(item: $viewModel.messageMenuRow) {
          if let row = viewModel.messageMenuRow {
             ZStack(alignment: .topLeading) {
-               Color.white
+               theme.colors.messageMenuBackground
                   .opacity(menuBgOpacity)
                   .ignoresSafeArea(.all)
                
@@ -346,54 +364,73 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyCon
    }
    
    func messageMenu(_ row: MessageRow) -> some View {
-      MessageMenu(
-         isShowingMenu: $isShowingMenu,
-         menuButtonsSize: $menuButtonsSize,
-         alignment: row.message.user.isCurrentUser ? .right : .left,
-         leadingPadding: avatarSize + MessageView.horizontalAvatarPadding * 2,
-         trailingPadding: MessageView.statusViewSize + MessageView.horizontalStatusPadding,
-         mainButton: {
-            ChatMessageView(
-               viewModel: viewModel,
-               messageBuilder: messageBuilder,
-               row: row,
-               chatType: type,
-               avatarSize: avatarSize,
-               tapAvatarClosure: nil,
-               messageUseMarkdown: messageUseMarkdown,
-               isDisplayingMessageMenu: true,
-               showMessageTimeView: showMessageTimeView,
-               messageFont: messageFont
-            )
-            .frame(width: UIScreen.main.bounds.width - 32)
-            .padding(.horizontal, 8)
-            .padding(.bottom, isShowingMenu ? 0 : 0) // Adjust bottom padding if menu is shown
-            .onAppear {
-               DispatchQueue.main.async {
-                  if let frame = cellFrames[row.id] {
-                     showMessageMenu(frame)
-                  }
-               }
-            }
-            .onTapGesture {
-               hideMessageMenu()
-            }
-         },
-         onAction: { action in
-            hideMessageMenu()
-            viewModel.messageMenuActionInternal(message: row.message, action: action)
-         },
-         messageText: row.message.text,
-         messageImageURL: row.message.attachments.first(where: { $0.type == .image })?.full,
-         messageDocumentURL: row.message.attachments.first(where: { $0.type == .files })?.full,
-         onSaveSuccess: {
-            showSaveSuccessMessage(forKey: "document_saved_successfully")
-         }
-      )
-      .frame(height: menuButtonsSize.height + (cellFrames[row.id]?.height ?? 0), alignment: .top)
-      .opacity(menuCellOpacity)
-      
+       MessageMenu(
+           isShowingMenu: $isShowingMenu,
+           menuButtonsSize: $menuButtonsSize,
+           alignment: row.message.user.isCurrentUser ? .right : .left,
+           leadingPadding: avatarSize + MessageView.horizontalAvatarPadding * 2,
+           trailingPadding: MessageView.statusViewSize + MessageView.horizontalStatusPadding,
+           onAction: menuActionClosure(row.message)) {
+              ChatMessageView(viewModel: viewModel, messageBuilder: messageBuilder, row: row, chatType: type, avatarSize: avatarSize, tapAvatarClosure: nil, messageUseMarkdown: messageUseMarkdown, isDisplayingMessageMenu: true, showMessageTimeView: showMessageTimeView, messageFont: messageFont)
+                   .onTapGesture {
+                       hideMessageMenu()
+                   }
+           }
+           .frame(height: menuButtonsSize.height + (cellFrames[row.id]?.height ?? 0), alignment: .top)
+           .opacity(menuCellOpacity)
    }
+   
+//   func messageMenuLe(_ row: MessageRow) -> some View {
+//      MessageMenu(
+//         isShowingMenu: $isShowingMenu,
+//         menuButtonsSize: $menuButtonsSize,
+//         alignment: row.message.user.isCurrentUser ? .right : .left,
+//         leadingPadding: avatarSize + MessageView.horizontalAvatarPadding * 2,
+//         trailingPadding: MessageView.statusViewSize + MessageView.horizontalStatusPadding,
+//         onAction: menuActionClosure(row.message)) {
+//            ChatMessageView(viewModel: viewModel, messageBuilder: messageBuilder, row: row, chatType: type, avatarSize: avatarSize, tapAvatarClosure: nil, messageUseMarkdown: messageUseMarkdown, isDisplayingMessageMenu: true, showMessageTimeView: showMessageTimeView, messageFont: messageFont)
+//               .onTapGesture {
+//                  hideMessageMenu()
+//               }
+//         }
+////         mainButton: {
+////            ChatMessageView(
+////               viewModel: viewModel,
+////               messageBuilder: messageBuilder,
+////               row: row,
+////               chatType: type,
+////               avatarSize: avatarSize,
+////               tapAvatarClosure: nil,
+////               messageUseMarkdown: messageUseMarkdown,
+////               isDisplayingMessageMenu: true,
+////               showMessageTimeView: showMessageTimeView,
+////               messageFont: messageFont
+////            )
+////            .frame(width: UIScreen.main.bounds.width - 32)
+////            .padding(.horizontal, 8)
+////            .padding(.bottom, isShowingMenu ? 0 : 0) // Adjust bottom padding if menu is shown
+////            .onAppear {
+////               DispatchQueue.main.async {
+////                  if let frame = cellFrames[row.id] {
+////                     showMessageMenu(frame)
+////                  }
+////               }
+////            }
+////            .onTapGesture {
+////               hideMessageMenu()
+////            }
+////         },
+////         messageText: row.message.text,
+////         messageImageURL: row.message.attachments.first(where: { $0.type == .image })?.full,
+////         messageDocumentURL: row.message.attachments.first(where: { $0.type == .files })?.full,
+////         onSaveSuccess: {
+////            showSaveSuccessMessage(forKey: "document_saved_successfully")
+////         }
+////      )
+//      .frame(height: menuButtonsSize.height + (cellFrames[row.id]?.height ?? 0), alignment: .top)
+//      .opacity(menuCellOpacity)
+//      
+//   }
    
    func showSnackbar(message: String) {
       snackbarMessage = message
@@ -409,6 +446,21 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MainBodyCon
       withAnimation {
          showSnackbar(message: message)
       }
+   }
+   
+   func menuActionClosure(_ message: Message) -> (MenuAction) -> () {
+      if let messageMenuAction {
+         return { action in
+            hideMessageMenu()
+            messageMenuAction(action, message)
+         }
+      } else if MenuAction.self == DefaultMessageMenuAction.self {
+         return { action in
+            hideMessageMenu()
+            viewModel.messageMenuActionInternal(message: message, action: action as! DefaultMessageMenuAction)
+         }
+      }
+      return { _ in }
    }
    
    func showMessageMenu(_ cellFrame: CGRect) {

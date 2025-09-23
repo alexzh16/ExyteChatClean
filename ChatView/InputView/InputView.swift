@@ -204,7 +204,6 @@ struct InputView: View {
             recordingInProgress
          default:
             TextInputView(text: $viewModel.text, inputFieldId: inputFieldId, style: style, availableInput: availableInput)
-//            Text("")
          }
       }
       .frame(minHeight: 48)

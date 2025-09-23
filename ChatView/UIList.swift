@@ -13,7 +13,7 @@ public extension Notification.Name {
 
 struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
    
-   typealias MessageBuilderClosure = ChatView<MessageContent, InputView, EmptyView>.MessageBuilderClosure
+   typealias MessageBuilderClosure = ChatView<MessageContent, InputView, EmptyView, DefaultMessageMenuAction>.MessageBuilderClosure
    
    @Environment(\.chatTheme) private var theme
    
@@ -98,10 +98,24 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
             return
          }
          
-         if let lastSection = sections.last {
-             context.coordinator.paginationTargetIndexPath = IndexPath(row: lastSection.rows.count - 1, section: sections.count - 1)
+         if context.coordinator.sections.isEmpty {
+            DispatchQueue.main.async {
+               context.coordinator.sections = sections
+               tableView.reloadData()
+               if !isScrollEnabled {
+                  DispatchQueue.main.async {
+                     tableContentHeight = tableView.contentSize.height
+                  }
+               }
+               updateSemaphore.signal()
+            }
+            return
          }
-
+         
+         if let lastSection = sections.last {
+            context.coordinator.paginationTargetIndexPath = IndexPath(row: lastSection.rows.count - 1, section: sections.count - 1)
+         }
+         
          let prevSections = context.coordinator.sections
          let (appliedDeletes, appliedDeletesSwapsAndEdits, deleteOperations, swapOperations, editOperations, insertOperations) = operationsSplit(oldSections: prevSections, newSections: sections)
          
@@ -168,7 +182,7 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
             }
          }
          tableSemaphore.wait()
-        
+         
          if isScrolledToBottom || isScrolledToTop {
             DispatchQueue.main.sync {
                // step 5
@@ -190,7 +204,7 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
                updateSemaphore.signal()
             }
          } else {
-//            context.coordinator.ids = ids
+            //            context.coordinator.ids = ids
             updateSemaphore.signal()
          }
       }
@@ -199,50 +213,50 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
    // MARK: - Operations
    
    enum Operation {
-        case deleteSection(Int)
-        case insertSection(Int)
-
-        case delete(Int, Int) // delete with animation
-        case insert(Int, Int) // insert with animation
-        case swap(Int, Int, Int) // delete first with animation, then insert it into new position with animation. do not do anything with the second for now
-        case edit(Int, Int) // reload the element without animation
-
-        var description: String {
-            switch self {
-            case .deleteSection(let int):
-                return "deleteSection \(int)"
-            case .insertSection(let int):
-                return "insertSection \(int)"
-            case .delete(let int, let int2):
-                return "delete section \(int) row \(int2)"
-            case .insert(let int, let int2):
-                return "insert section \(int) row \(int2)"
-            case .swap(let int, let int2, let int3):
-                return "swap section \(int) rowFrom \(int2) rowTo \(int3)"
-            case .edit(let int, let int2):
-                return "edit section \(int) row \(int2)"
-            }
-        }
-    }
+      case deleteSection(Int)
+      case insertSection(Int)
+      
+      case delete(Int, Int) // delete with animation
+      case insert(Int, Int) // insert with animation
+      case swap(Int, Int, Int) // delete first with animation, then insert it into new position with animation. do not do anything with the second for now
+      case edit(Int, Int) // reload the element without animation
+      
+      var description: String {
+         switch self {
+         case .deleteSection(let int):
+            return "deleteSection \(int)"
+         case .insertSection(let int):
+            return "insertSection \(int)"
+         case .delete(let int, let int2):
+            return "delete section \(int) row \(int2)"
+         case .insert(let int, let int2):
+            return "insert section \(int) row \(int2)"
+         case .swap(let int, let int2, let int3):
+            return "swap section \(int) rowFrom \(int2) rowTo \(int3)"
+         case .edit(let int, let int2):
+            return "edit section \(int) row \(int2)"
+         }
+      }
+   }
    
    func applyOperation(_ operation: Operation, tableView: UITableView) {
-       let animation: UITableView.RowAnimation = type == .conversation ? .top : .top
-       switch operation {
-       case .deleteSection(let section):
-           tableView.deleteSections([section], with: animation)
-       case .insertSection(let section):
-           tableView.insertSections([section], with: animation)
-
-       case .delete(let section, let row):
-           tableView.deleteRows(at: [IndexPath(row: row, section: section)], with: animation)
-       case .insert(let section, let row):
-           tableView.insertRows(at: [IndexPath(row: row, section: section)], with: animation)
-       case .edit(let section, let row):
-           tableView.reloadRows(at: [IndexPath(row: row, section: section)], with: .none)
-       case .swap(let section, let rowFrom, let rowTo):
-           tableView.deleteRows(at: [IndexPath(row: rowFrom, section: section)], with: animation)
-           tableView.insertRows(at: [IndexPath(row: rowTo, section: section)], with: animation)
-       }
+      let animation: UITableView.RowAnimation = .top
+      switch operation {
+      case .deleteSection(let section):
+         tableView.deleteSections([section], with: animation)
+      case .insertSection(let section):
+         tableView.insertSections([section], with: animation)
+         
+      case .delete(let section, let row):
+         tableView.deleteRows(at: [IndexPath(row: row, section: section)], with: animation)
+      case .insert(let section, let row):
+         tableView.insertRows(at: [IndexPath(row: row, section: section)], with: animation)
+      case .edit(let section, let row):
+         tableView.reloadRows(at: [IndexPath(row: row, section: section)], with: .none)
+      case .swap(let section, let rowFrom, let rowTo):
+         tableView.deleteRows(at: [IndexPath(row: rowFrom, section: section)], with: animation)
+         tableView.insertRows(at: [IndexPath(row: rowTo, section: section)], with: animation)
+      }
    }
    
    func operationsSplit(oldSections: [MessagesSection], newSections: [MessagesSection]) -> ([MessagesSection], [MessagesSection], [Operation], [Operation], [Operation], [Operation]) {
@@ -350,7 +364,7 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
    func makeCoordinator() -> Coordinator {
       Coordinator(viewModel: viewModel, inputViewModel: inputViewModel, isScrolledToBottom: $isScrolledToBottom, isScrolledToTop: $isScrolledToTop, messageBuilder: messageBuilder, headerBuilder: headerBuilder, chatTheme: theme, type: type, showDateHeaders: showDateHeaders, avatarSize: avatarSize, showMessageMenuOnLongPress: showMessageMenuOnLongPress, tapAvatarClosure: tapAvatarClosure, paginationHandler: paginationHandler, messageUseMarkdown: messageUseMarkdown, mainBackgroundColor: theme.colors.mainBackground, sections: sections, showMessageTimeView: showMessageTimeView, messageFont: messageFont, ids: ids)
    }
-
+   
    class Coordinator: NSObject, UITableViewDataSource, UITableViewDelegate {
       
       @ObservedObject var viewModel: ChatViewModel
@@ -361,7 +375,7 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
       
       var messageBuilder: MessageBuilderClosure?
       let headerBuilder: ((Date)->AnyView)?
-
+      
       let chatTheme: ChatTheme
       let type: ChatType
       let showDateHeaders: Bool
@@ -379,7 +393,7 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
       /// call pagination handler when this row is reached
       /// without this there is a bug: during new cells insertion willDisplay is called one extra time for the cell which used to be the last one while it is being updated (its position in group is changed from first to middle)
       var paginationTargetIndexPath: IndexPath?
-
+      
       init(viewModel: ChatViewModel, inputViewModel: InputViewModel, isScrolledToBottom: Binding<Bool>, isScrolledToTop: Binding<Bool>, messageBuilder: MessageBuilderClosure?, headerBuilder: ((Date)->AnyView)?, chatTheme: ChatTheme, type: ChatType, showDateHeaders: Bool, avatarSize: CGFloat, showMessageMenuOnLongPress: Bool, tapAvatarClosure: ChatView.TapAvatarClosure?, paginationHandler: PaginationHandler?, messageUseMarkdown: Bool, mainBackgroundColor: Color, sections: [MessagesSection], showMessageTimeView: Bool, messageFont: UIFont, ids: [String]) {
          self.viewModel = viewModel
          self.inputViewModel = inputViewModel
@@ -476,13 +490,13 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
       }
       
       func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-          guard let paginationHandler, let paginationTargetIndexPath, indexPath == paginationTargetIndexPath else {
-              return
-          }
-          let row = self.sections[indexPath.section].rows[indexPath.row]
-          Task.detached {
-              await paginationHandler.handleClosure(row.message)
-          }
+         guard let paginationHandler, let paginationTargetIndexPath, indexPath == paginationTargetIndexPath else {
+            return
+         }
+         let row = self.sections[indexPath.section].rows[indexPath.row]
+         Task.detached {
+            await paginationHandler.handleClosure(row.message)
+         }
       }
       
       func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -493,7 +507,7 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
    
    func formatRow(_ row: MessageRow) -> String {
       if let status = row.message.status {
-         return String("id: \(row.id) text: \(row.message.text) status: \(status) date: \(row.message.createdAt) position: \(row.positionInGroup) trigger: \(row.message.triggerRedraw)")
+         return String("id: \(row.id) text: \(row.message.text) status: \(status) date: \(row.message.createdAt) position: \(row.positionInUserGroup) trigger: \(row.message.triggerRedraw)")
       }
       return ""
    }

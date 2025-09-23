@@ -37,29 +37,29 @@ final class ChatViewModel: ObservableObject {
       uploadedFileURL = url
    }
    
-   func messageMenuAction() -> (ExyteChatMessage, MessageMenuAction) -> Void {
+   func messageMenuAction() -> (Message, DefaultMessageMenuAction) -> Void {
        { [weak self] in
            self?.messageMenuActionInternal(message: $0, action: $1)
        }
    }
 
-   func messageMenuActionInternal(message: ExyteChatMessage, action: MessageMenuAction) {
+   func messageMenuActionInternal(message: Message, action: DefaultMessageMenuAction) {
        switch action {
        case .reply:
            inputViewModel?.attachments.replyMessage = message.toReplyMessage()
-           globalFocusState?.focus = .uuid(inputFieldId)
-       case .copy:
-          debugPrint("copy")
-       case .saveImageToAlbum:
-          debugPrint("saveImageToAlbum")
-       case .saveImageToDevice:
-          debugPrint("saveImageToDevice")
-       case .saveDocument:
-          debugPrint("saveDocument")
-       case .saveText:
-          debugPrint("saveText")
-       case .share:
-          debugPrint("share")
+//           globalFocusState?.focus = .uuid(inputFieldId)
+//       case .copy:
+//          debugPrint("copy")
+//       case .saveImageToAlbum:
+//          debugPrint("saveImageToAlbum")
+//       case .saveImageToDevice:
+//          debugPrint("saveImageToDevice")
+//       case .saveDocument:
+//          debugPrint("saveDocument")
+//       case .saveText:
+//          debugPrint("saveText")
+//       case .share:
+//          debugPrint("share")
        }
    }
 }
