@@ -11,7 +11,7 @@ import ActivityIndicatorView
 struct AttachmentsEditor<InputViewContent: View>: View {
    let logTAG = "AttachmentsEditor"
    
-   typealias InputViewBuilderClosure = ChatView<EmptyView, InputViewContent, EmptyView, DefaultMessageMenuAction>.InputViewBuilderClosure
+   typealias InputViewBuilderClosure = ChatView<EmptyView, InputViewContent, DefaultMessageMenuAction>.InputViewBuilderClosure
    
    @Environment(\.chatTheme) var theme
    @Environment(\.mediaPickerTheme) var pickerTheme
@@ -27,7 +27,7 @@ struct AttachmentsEditor<InputViewContent: View>: View {
    var orientationHandler: MediaPickerOrientationHandler
    var mediaPickerSelectionParameters: MediaPickerParameters?
    var availableInput: AvailableInputType
-   
+
    @State private var seleсtedMedias: [Media] = []
    @State private var currentFullscreenMedia: Media?
    @State private var showDocumentPicker: Bool = false

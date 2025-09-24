@@ -9,7 +9,7 @@ import SwiftUI
 
 struct ChatMessageView<MessageContent: View>: View {
    
-   typealias MessageBuilderClosure = ChatView<MessageContent, EmptyView, EmptyView, DefaultMessageMenuAction>.MessageBuilderClosure
+   typealias MessageBuilderClosure = ChatView<MessageContent, EmptyView, DefaultMessageMenuAction>.MessageBuilderClosure
 
    @ObservedObject var viewModel: ChatViewModel
    
@@ -45,8 +45,8 @@ struct ChatMessageView<MessageContent: View>: View {
                tapAvatarClosure: tapAvatarClosure,
                messageUseMarkdown: messageUseMarkdown,
                isDisplayingMessageMenu: isDisplayingMessageMenu,
-//               showMessageTimeView: showMessageTimeView,
-//               font: messageFont
+               showMessageTimeView: showMessageTimeView,
+               font: messageFont
             )
          }
       }
