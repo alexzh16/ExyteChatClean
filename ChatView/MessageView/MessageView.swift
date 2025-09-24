@@ -26,6 +26,7 @@ struct MessageView: View {
    @State var timeSize: CGSize = .zero
    
    static let widthWithMedia: CGFloat = 204
+   static let horizontalNoAvatarPadding: CGFloat = 8
    static let horizontalAvatarPadding: CGFloat = 8
    static let horizontalTextPadding: CGFloat = 12
    static let horizontalAttachmentPadding: CGFloat = 1 // for multiple attachments
@@ -35,7 +36,7 @@ struct MessageView: View {
    
    let font = UIFont.systemFont(ofSize: 15)
    
-   enum DateArrangment {
+   enum DateArrangement {
       case hstack, vstack, overlay
    }
    
@@ -43,11 +44,11 @@ struct MessageView: View {
       message.attachments.count > 1 ? MessageView.horizontalAttachmentPadding * 2 : 0
    }
    
-   var dateArrangment: DateArrangment {
+   var dateArrangement: DateArrangement {
       let timeWidth = timeSize.width + 10
       let textPaddings = MessageView.horizontalTextPadding * 2
       let widthWithoutMedia = UIScreen.main.bounds.width
-      - avatarViewSize.width
+      - (message.user.isCurrentUser ? MessageView.horizontalNoAvatarPadding : avatarViewSize.width)
       - statusSize.width
       - MessageView.horizontalBubblePadding
       - textPaddings
@@ -113,6 +114,7 @@ struct MessageView: View {
       }
       .padding(.top, topPadding)
       .padding(.bottom, bottomPadding)
+      .padding(.trailing, message.user.isCurrentUser ? MessageView.horizontalNoAvatarPadding : 0)
       .padding(message.user.isCurrentUser ? .leading : .trailing, MessageView.horizontalBubblePadding)
       .frame(maxWidth: UIScreen.main.bounds.width, alignment: message.user.isCurrentUser ? .trailing : .leading)
    }
@@ -215,7 +217,7 @@ struct MessageView: View {
          .padding(.trailing, 12)
       
       Group {
-         switch dateArrangment {
+         switch dateArrangement {
          case .hstack:
             HStack(alignment: .lastTextBaseline, spacing: 12) {
                messageView
