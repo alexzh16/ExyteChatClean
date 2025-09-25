@@ -388,7 +388,13 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
       let messageUseMarkdown: Bool
       let showMessageTimeView: Bool
       let messageFont: UIFont
-      var sections: [MessagesSection]
+      var sections: [MessagesSection] {
+         didSet {
+            if let lastSection = sections.last {
+               paginationTargetIndexPath = IndexPath(row: lastSection.rows.count - 1, section: sections.count - 1)
+            }
+         }
+      }
       var ids: [String]
       let mainBackgroundColor: Color
       
@@ -489,7 +495,7 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
             } else {
                Text(sections[section].formattedDate)
                   .font(.system(size: 11))
-                  .rotationEffect(Angle(degrees: (type == .conversation ? 180 : 0)))
+//                  .rotationEffect(Angle(degrees: (type == .conversation ? 180 : 0)))
                   .padding(10)
                   .padding(.bottom, 8)
                   .foregroundColor(.gray)

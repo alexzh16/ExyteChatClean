@@ -10,6 +10,7 @@ import FloatingButton
 import SwiftUIIntrospect
 import UniformTypeIdentifiers
 import UIKit
+import PopupView
 
 public typealias MediaPickerParameters = SelectionParamsHolder
 
@@ -66,11 +67,16 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
       _ dismissKeyboardClosure: ()->()
    ) -> InputViewContent
    
-   /// To define custom message menu actions
-   /// - enum listing action options
-   /// - message for which the menu is disaplyed
-   /// closure returns the action to perform on selected action tap
-   public typealias MessageMenuActionClosure = ((MenuAction, Message)->Void)
+   /// To define custom message menu actions declare an enum conforming to MessageMenuAction. The library will show your custom menu options on long tap on message. Once the action is selected the following callback will be called:
+   /// - action selected by the user from the menu. NOTE: when declaring this variable, specify its type (your custom descendant of MessageMenuAction) explicitly
+   /// - a closure taking a case of default implementation of MessageMenuAction which provides simple actions handlers; you call this closure passing the selected message and choosing one of the default actions if you need them; or you can write a custom implementation for all your actions, in that case just ignore this closure
+   /// - message for which the menu is displayed
+   /// When implementing your own MessageMenuActionClosure, write a switch statement passing through all the cases of your MessageMenuAction, inside each case write your own action handler, or call the default one. NOTE: not all default actions work out of the box - e.g. for .edit you'll still need to provide a closure to save the edited text on your BE. Please see CommentsExampleView in ChatExample project for MessageMenuActionClosure usage example.
+   public typealias MessageMenuActionClosure = (
+       _ selectedMenuAction: MenuAction,
+       _ defaultActionClosure: @escaping (Message, DefaultMessageMenuAction) -> Void,
+       _ message: Message
+   ) -> Void
 
    /// User and MessageId
    public typealias TapAvatarClosure = (ExyteChatUser, String) -> ()
@@ -122,6 +128,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
    var showMessageTimeView = true
    var messageFont = UIFontMetrics.default.scaledFont(for: UIFont.systemFont(ofSize: 15))
    var availablelInput: AvailableInputType = .full
+   var recorderSettings: RecorderSettings? = RecorderSettings()
    
    @StateObject private var viewModel = ChatViewModel()
    @StateObject private var inputViewModel = InputViewModel()
@@ -168,6 +175,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
    public var body: some View {
       mainView
          .background(theme.colors.mainBackground)
+         .environmentObject(keyboardState)
          .fullScreenCover(isPresented: $viewModel.fullscreenAttachmentPresented) {
             let attachments = sections.flatMap { section in section.rows.flatMap { $0.message.attachments } }
             let index = attachments.firstIndex { $0.id == viewModel.fullscreenAttachmentItem?.id }
@@ -190,10 +198,39 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
             AttachmentsEditor(inputViewModel: inputViewModel, inputViewBuilder: inputViewBuilder, chatTitle: chatTitle, messageUseMarkdown: messageUseMarkdown, orientationHandler: orientationHandler, mediaPickerSelectionParameters: mediaPickerSelectionParameters, availableInput: availablelInput)
                .environmentObject(globalFocusState)
          }
-         .onChange(of: inputViewModel.showPicker) {
-            if $0 {
+         .onChange(of: inputViewModel.showPicker) { _, val in
+            if val {
                globalFocusState.focus = nil
             }
+         }
+         .popup(isPresented: $viewModel.showConfirmDeleteMessage) {
+            VStack(spacing: 0) {
+               Text("Are you sure you want to delete this message?")
+                  .multilineTextAlignment(.center)
+                  .padding(15)
+               
+               Divider()
+               
+               Button("Delete", role: .destructive) {
+                  viewModel.confirmDeleteMessageClosure?()
+                  viewModel.showConfirmDeleteMessage = false
+               }
+               .padding(15)
+               
+               Divider()
+               
+               Button("Cancel", role: .cancel) {
+                  viewModel.confirmDeleteMessageClosure = nil
+                  viewModel.showConfirmDeleteMessage = false
+               }
+               .padding(15)
+            }
+            .background(.ultraThickMaterial)
+            .cornerRadius(10)
+            .padding(.horizontal, 30)
+         } customize: {
+            $0.type(.floater())
+               .closeOnTap(false)
          }
    }
    
@@ -302,7 +339,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
                   ScrollView {
                      messageMenu(row)
                   }
-                  .introspect(.scrollView, on: .iOS(.v16, .v17)) { scrollView in
+                  .introspect(.scrollView, on: .iOS(.v16, .v17, .v18, .v26)) { scrollView in
                      DispatchQueue.main.async {
                         self.menuScrollView = scrollView
                      }
@@ -360,7 +397,8 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
                inputFieldId: viewModel.inputFieldId,
                style: .message,
                availableInput: availablelInput,
-               messageUseMarkdown: messageUseMarkdown
+               messageUseMarkdown: messageUseMarkdown,
+               recorderSettings: recorderSettings
             )
          }
       }
@@ -462,7 +500,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
       if let messageMenuAction {
          return { action in
             hideMessageMenu()
-            messageMenuAction(action, message)
+            messageMenuAction(action, viewModel.messageMenuAction(), message)
          }
       } else if MenuAction.self == DefaultMessageMenuAction.self {
          return { action in
@@ -744,6 +782,7 @@ public extension ChatView {
       return view
    }
    
+   @available(*, deprecated)
    func chatNavigation(title: String, status: String? = nil, cover: URL? = nil) -> some View {
       var view = self
       view.chatTitle = title
@@ -788,5 +827,11 @@ public extension ChatView {
       var view = self
       view.availablelInput = type
       return view
+   }
+   
+   func setRecorderSettings(_ settings: RecorderSettings) -> ChatView {
+       var view = self
+       view.recorderSettings = settings
+       return view
    }
 }

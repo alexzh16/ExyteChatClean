@@ -27,7 +27,11 @@ final class InputViewModel: ObservableObject {
    // MARK: - Private Properties
    private let recorder = Recorder()
    var recordingPlayer: RecordingPlayer?
+   private var saveEditingClosure: ((String) -> Void)?
    private var subscriptions = Set<AnyCancellable>()
+   func setRecorderSettings(recorderSettings: RecorderSettings = RecorderSettings()) {
+      self.recorder.recorderSettings = recorderSettings
+   }
    private var recordPlayerSubscription: AnyCancellable?
 
     // MARK: - Lifecycle
@@ -40,17 +44,16 @@ final class InputViewModel: ObservableObject {
    }
    
    func reset() {
-      showPicker = false
-      attachments = InputViewAttachments()
-      subscribeValidation()
-      text = ""
+      DispatchQueue.main.async { [weak self] in
+          self?.showPicker = false
+          self?.text = ""
+          self?.saveEditingClosure = nil
+          self?.attachments = InputViewAttachments()
+          self?.subscribeValidation()
+          self?.state = .empty
+      }
       showDocumentPicker = false
       documents = []
-//      DispatchQueue.main.async { [weak self] in
-//         self?.text = ""
-//         self?.showDocumentPicker = false
-//         self?.documents = []
-//      }
    }
    
    func send() {
@@ -59,7 +62,12 @@ final class InputViewModel: ObservableObject {
       sendMessage()
          .store(in: &subscriptions)
    }
-   /****/
+   
+   func edit(_ closure: @escaping (String) -> Void) {
+       saveEditingClosure = closure
+       state = .editing
+   }
+
    func inputViewAction() -> (InputViewAction) -> Void {
       { [weak self] in
          self?.inputViewActionInternal($0)
@@ -99,6 +107,11 @@ final class InputViewModel: ObservableObject {
          playRecording()
       case .pauseRecord:
          pauseRecording()
+      case .saveEdit:
+          saveEditingClosure?(text)
+          reset()
+      case .cancelEdit:
+          reset()
       case .picker:
          showOptionsBanner.toggle()
       }
@@ -236,7 +249,7 @@ final class InputViewModel: ObservableObject {
       recordingPlayer?.pause()
    }
    
-   func recordAudio() {
+   private func recordAudio() {
       if recorder.isRecording {
          return
       }
@@ -261,6 +274,7 @@ private extension InputViewModel {
    func validateDraft() {
       DispatchQueue.main.async { [weak self] in
          guard let self = self else { return }
+         guard state != .editing else { return } // special case
          if !self.text.isEmpty || !self.attachments.medias.isEmpty {
             self.state = .hasTextOrMedia
          } else if self.text.isEmpty,

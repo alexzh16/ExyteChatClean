@@ -19,6 +19,9 @@ final class ChatViewModel: ObservableObject {
    var inputViewModel: InputViewModel?
    var globalFocusState: GlobalFocusState?
    
+   @Published var showConfirmDeleteMessage = false
+   @Published var confirmDeleteMessageClosure: (() -> Void)?
+   
    func presentAttachmentFullScreen(_ attachment: Attachment) {
       fullscreenAttachmentItem = attachment
       fullscreenAttachmentPresented = true
@@ -38,16 +41,25 @@ final class ChatViewModel: ObservableObject {
    }
    
    func messageMenuAction() -> (Message, DefaultMessageMenuAction) -> Void {
-       { [weak self] in
-           self?.messageMenuActionInternal(message: $0, action: $1)
-       }
+      { [weak self] message, action in
+         DispatchQueue.main.async {
+            self?.messageMenuActionInternal(message: message, action: action)
+         }
+      }
    }
 
    func messageMenuActionInternal(message: Message, action: DefaultMessageMenuAction) {
        switch action {
        case .reply:
            inputViewModel?.attachments.replyMessage = message.toReplyMessage()
-//           globalFocusState?.focus = .uuid(inputFieldId)
+           globalFocusState?.focus = .uuid(inputFieldId)
+       case .edit(let saveClosure):
+           inputViewModel?.text = message.text
+           inputViewModel?.edit(saveClosure)
+           globalFocusState?.focus = .uuid(inputFieldId)
+       case .delete(let confirmClosure):
+           showConfirmDeleteMessage = true
+           confirmDeleteMessageClosure = confirmClosure
 //       case .copy:
 //          debugPrint("copy")
 //       case .saveImageToAlbum:

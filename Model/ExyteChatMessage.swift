@@ -113,7 +113,14 @@ extension ExyteChatMessage {
 
 extension ExyteChatMessage: Equatable {
    public static func == (lhs: ExyteChatMessage, rhs: ExyteChatMessage) -> Bool {
-      lhs.id == rhs.id && lhs.status == rhs.status
+      lhs.id == rhs.id &&
+      lhs.user == rhs.user &&
+      lhs.status == rhs.status &&
+      lhs.createdAt == rhs.createdAt &&
+      lhs.text == rhs.text &&
+      lhs.attachments == rhs.attachments &&
+      lhs.recording == rhs.recording &&
+      lhs.replyMessage == rhs.replyMessage
    }
 }
 
@@ -131,24 +138,31 @@ public struct ExyteChatRecording: Codable, Hashable {
 
 public struct ReplyMessage: Codable, Identifiable, Hashable {
    public static func == (lhs: ReplyMessage, rhs: ReplyMessage) -> Bool {
-      lhs.id == rhs.id
+      lhs.id == rhs.id &&
+      lhs.user == rhs.user &&
+      lhs.createdAt == rhs.createdAt &&
+      lhs.text == rhs.text &&
+      lhs.attachments == rhs.attachments &&
+      lhs.recording == rhs.recording
    }
    
    public var id: String
    public var user: ExyteChatUser
-   
+   public var createdAt: Date
    public var text: String
    public var attachments: [Attachment]
    public var recording: ExyteChatRecording?
    
    public init(id: String,
                user: ExyteChatUser,
+               createdAt: Date = Date(),
                text: String = "",
                attachments: [Attachment] = [],
                recording: ExyteChatRecording? = nil) {
       
       self.id = id
       self.user = user
+      self.createdAt = createdAt
       self.text = text
       self.attachments = attachments
       self.recording = recording
@@ -161,8 +175,7 @@ public struct ReplyMessage: Codable, Identifiable, Hashable {
 
 public extension ExyteChatMessage {
     func toReplyMessage() -> ReplyMessage {
-//        ReplyMessage(id: id, user: user, createdAt: createdAt, text: text, attachments: attachments, recording: recording)
-        ReplyMessage(id: id, user: user, text: text, attachments: attachments, recording: recording)
+        ReplyMessage(id: id, user: user, createdAt: createdAt, text: text, attachments: attachments, recording: recording)
     }
 }
 
@@ -177,6 +190,7 @@ public extension ReplyMessage {
    static func createReplyMessage(
       id: String,
       user: ExyteChatUser,
+      createdAt: String = "",
       text: String = "",
       originalMessage: ExyteChatMessage
    ) async -> ReplyMessage {

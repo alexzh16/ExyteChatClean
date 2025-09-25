@@ -27,6 +27,7 @@ public enum InputViewAction {
    case add
    case camera
    case send
+   
    case recordAudioHold
    case recordAudioTap
    case recordAudioLock
@@ -35,19 +36,24 @@ public enum InputViewAction {
    case playRecord
    case pauseRecord
    //    case location
-   //    case files
+   //    case document
    case picker
+   case saveEdit
+   case cancelEdit
 }
 
 public enum InputViewState {
    case empty
    case hasTextOrMedia
+   
    case waitingForRecordingPermission
    case isRecordingHold
    case isRecordingTap
    case hasRecording
    case playingRecording
    case pausedRecording
+   
+   case editing
    
    var canSend: Bool {
       switch self {
@@ -80,9 +86,8 @@ public struct InputViewAttachments {
    public var attachments: [Attachment] = []
 }
 
-
 struct InputView: View {
-   let logTAG = "InputView"
+   
    @Environment(\.chatTheme) private var theme
    @Environment(\.mediaPickerTheme) private var pickerTheme
    
@@ -91,6 +96,7 @@ struct InputView: View {
    var style: InputViewStyle
    var availableInput: AvailableInputType
    var messageUseMarkdown: Bool
+   var recorderSettings:RecorderSettings = RecorderSettings()
    
    @StateObject var recordingPlayer = RecordingPlayer()
    
@@ -112,20 +118,6 @@ struct InputView: View {
    @State private var tapDelayTimer: Timer?
    @State private var cancelGesture = false
    private let tapDelay = 0.2
-   @State private var showOptionsBanner = false
-   @State private var attachButtonFrame: CGRect = .zero
-   @State private var keyboardHeight: CGFloat = 0
-   
-   private var keyboardPublisher: AnyPublisher<CGFloat, Never> {
-      Publishers.Merge(
-         NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
-            .compactMap { $0.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect }
-            .map { $0.height },
-         NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
-            .map { _ in CGFloat(0) }
-      )
-      .eraseToAnyPublisher()
-   }
    
    var body: some View {
       VStack {
@@ -149,38 +141,9 @@ struct InputView: View {
       .background(backgroundColor)
       .onAppear {
          viewModel.recordingPlayer = recordingPlayer
+         viewModel.setRecorderSettings(recorderSettings: recorderSettings)
       }
-      .onReceive(keyboardPublisher) { newKeyboardHeight in
-         keyboardHeight = newKeyboardHeight
-         showOptionsBanner = false // Hide the banner when keyboard state changes
-      }
-      .background(
-         GeometryReader { geo in
-            Color.clear
-               .onChange(of: geo.frame(in: .global)) { newFrame, _ in
-                  attachButtonFrame = newFrame
-                  debugPrint("\(logTAG) \(#line) \(#function) Attach Button Frame: \(attachButtonFrame)")
-                  debugPrint("\(logTAG) \(#line) \(#function) Attach Button X: \(attachButtonFrame.minX) Y: \(attachButtonFrame.minY)")
-               }
-         }
-      )
-      .overlay(
-         GeometryReader { geo in
-            if showOptionsBanner {
-               AttachmentOptionsBanner { option in
-                  viewModel.handleAttachmentOptionSelected(option: option)
-                  showOptionsBanner = false
-               }
-               .frame(width: 200, height: 150)
-               .cornerRadius(10)
-               .shadow(radius: 5)
-               .position(x: 90, y: -50)
-               .zIndex(1)
-            }
-         }
-      )
    }
-   
    
    @ViewBuilder
    var leftView: some View {
@@ -241,37 +204,68 @@ struct InputView: View {
    }
    
    @ViewBuilder
-   var rightOutsideButton: some View {
-      ZStack {
-         if [.isRecordingTap, .isRecordingHold].contains(state) {
-            RecordIndicator()
-               .viewSize(80)
-               .foregroundColor(theme.colors.sendButtonBackground)
+   var editingButtons: some View {
+      HStack {
+         Button {
+            onAction(.cancelEdit)
+         } label: {
+            Image(systemName: "xmark")
+               .foregroundStyle(.white)
+               .fontWeight(.bold)
+               .padding(5)
+               .background(Circle().foregroundStyle(.red))
          }
-         Group {
-            if state.canSend || availableInput == .textOnly {
-               sendButton
-                  .disabled(!state.canSend)
-            } else {
-               recordButton
-                  .highPriorityGesture(dragGesture())
-            }
-         }
-         .compositingGroup()
-         .overlay(alignment: .top) {
-            Group {
-               if state == .isRecordingTap {
-                  stopRecordButton
-               } else if state == .isRecordingHold {
-                  lockRecordButton
-               }
-            }
-            .sizeGetter($overlaySize)
-            // hardcode 28 for now because sizeGetter returns 0 somehow
-            .offset(y: (state == .isRecordingTap ? -28 : -overlaySize.height) - 24)
+         
+         Button {
+            onAction(.saveEdit)
+         } label: {
+            Image(systemName: "checkmark")
+               .foregroundStyle(.white)
+               .fontWeight(.bold)
+               .padding(5)
+               .background(Circle().foregroundStyle(.green))
          }
       }
-      .viewSize(48)
+   }
+   
+   @ViewBuilder
+   var rightOutsideButton: some View {
+      if state == .editing {
+         editingButtons
+            .frame(height: 48)
+      }
+      else {
+         ZStack {
+            if [.isRecordingTap, .isRecordingHold].contains(state) {
+               RecordIndicator()
+                  .viewSize(80)
+                  .foregroundColor(theme.colors.sendButtonBackground)
+            }
+            Group {
+               if state.canSend || availableInput == .textOnly {
+                  sendButton
+                     .disabled(!state.canSend)
+               } else {
+                  recordButton
+                     .highPriorityGesture(dragGesture())
+               }
+            }
+            .compositingGroup()
+            .overlay(alignment: .top) {
+               Group {
+                  if state == .isRecordingTap {
+                     stopRecordButton
+                  } else if state == .isRecordingHold {
+                     lockRecordButton
+                  }
+               }
+               .sizeGetter($overlaySize)
+               // hardcode 28 for now because sizeGetter returns 0 somehow
+               .offset(y: (state == .isRecordingTap ? -28 : -overlaySize.height) - 24)
+            }
+         }
+         .viewSize(48)
+      }
    }
    
    @ViewBuilder
@@ -338,8 +332,7 @@ struct InputView: View {
    
    var attachButton: some View {
       Button {
-         //            onAction(.picker)
-         showOptionsBanner.toggle()
+         onAction(.photo)
       } label: {
          theme.images.inputView.attach
             .viewSize(24)

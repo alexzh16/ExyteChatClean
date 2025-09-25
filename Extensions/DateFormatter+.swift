@@ -5,6 +5,8 @@
 import Foundation
 
 extension DateFormatter {
+   static var agoFormatter = RelativeDateTimeFormatter()
+   
    static let timeFormatter = {
       let formatter = DateFormatter()
       
